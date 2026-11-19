@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inline-4 Moto Engine Simulator — 四缸摩托车发动机物理与声浪模拟器 | xiaoA0v0</title>
+  <meta name="description" content="纯前端 HTML5 Canvas + Web Audio API 直列四缸摩托车发动机实时模拟器：支持平面曲轴与雅马哈十字曲轴切换、四缸独立曲柄偏角调节、缸径行程、点火提前角、断油红线、6速变速箱与实时物理声浪合成。" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+
+  <!-- 顶部导航栏与经典车型一键预设 -->
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <div class="brand">
+        <div class="brand-badge">🏍️</div>
+        <div>
+          <h1>Inline-4 <span class="accent">Engine Sim</span></h1>
+          <p class="subtitle">直列四缸摩托车发动机 · 运动学剖面 &amp; 物理声浪模拟器</p>
+        </div>
+      </div>
+
+      <div class="preset-bar" aria-label="经典摩托车发动机预设">
+        <span class="preset-label">经典机型预设：</span>
+        <button class="preset-btn active" data-preset="zx4rr">ZX-4RR (399cc 平面高转)</button>
+        <button class="preset-btn" data-preset="r1">Yamaha R1 (998cc 十字曲轴)</button>
+        <button class="preset-btn" data-preset="cbr1000">CBR1000RR-R (999cc)</button>
+        <button class="preset-btn" data-preset="cb400">CB400 SF (399cc 哨音)</button>
+        <button class="preset-btn" data-preset="bigbang">MotoGP Big-Bang</button>
+      </div>
+
+      <div class="top-actions">
+        <button id="btn-audio" class="btn-audio" title="开启或静音真实物理合成引擎声浪">🔇 开启声浪</button>
+        <a class="btn-gh" href="https://github.com/xiaoA0v0/Inline4-Engine-Sim" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="container workspace">
+    <!-- ==================== 左侧主视觉舞台 ==================== -->
+    <section class="stage-column">
+      <!-- 换挡提示灯 (Shift Light Bar) -->
+      <div class="shift-light-bar" id="shift-lights" aria-label="高转红线换挡提示灯">
+        <span class="led g"></span><span class="led g"></span><span class="led g"></span><span class="led g"></span>
+        <span class="led y"></span><span class="led y"></span><span class="led y"></span><span class="led y"></span>
+        <span class="led r"></span><span class="led r"></span><span class="led r"></span><span class="led r"></span>
+      </div>
+
+      <!-- 主画布：DOHC 直列四缸剖面实时动画 -->
+      <div class="card stage-card">
+        <div class="stage-head">
+          <div class="stage-meta">
+            <span class="tag accent" id="meta-crank">平面曲轴 180° (Flat-Plane)</span>
+            <span class="tag" id="meta-order">点火顺序 1-3-4-2</span>
+            <span class="tag" id="meta-disp">399 cc</span>
+            <span class="tag warn hidden" id="meta-limiter">🔥 REV LIMITER 断油保护</span>
+          </div>
+          <div class="stage-view-controls">
+            <label class="toggle-mini"><input type="checkbox" id="chk-labels" checked /> 标注冲程</label>
+            <label class="toggle-mini"><input type="checkbox" id="chk-gas" checked /> 燃烧特效</label>
+            <button id="btn-pause" class="btn-mini">⏸ 暂停</button>
+          </div>
+        </div>
+
+        <div class="canvas-wrap main-canvas-wrap">
+          <canvas id="engine-canvas" width="960" height="470"></canvas>
+        </div>
+
+        <!-- 实时遥测仪表栏 -->
+        <div class="telemetry-bar">
+          <div class="tele-item">
+            <span class="tele-label">实时转速 (RPM)</span>
+            <span class="tele-val accent" id="tele-rpm">1,350</span>
+          </div>
+          <div class="tele-item">
+            <span class="tele-label">当前档位 / 模拟时速</span>
+            <span class="tele-val" id="tele-gear-speed"><strong class="gear-pill" id="tele-gear">N</strong> <span id="tele-speed">0</span> <small>km/h</small></span>
+          </div>
+          <div class="tele-item">
+            <span class="tele-label">实时输出马力</span>
+            <span class="tele-val green" id="tele-hp">4.2 <small>HP</small></span>
+          </div>
+          <div class="tele-item">
+            <span class="tele-label">实时输出扭矩</span>
+            <span class="tele-val amber" id="tele-nm">12.5 <small>N·m</small></span>
+          </div>
+          <div class="tele-item">
+            <span class="tele-label">活塞平均线速度</span>
+            <span class="tele-val" id="tele-piston-spd">1.8 <small>m/s</small></span>
+          </div>
+          <div class="tele-item">
+            <span class="tele-label">排气歧管温度</span>
+            <span class="tele-val red" id="tele-egt">310 <small>°C</small></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 油门与变速箱实时操控台 -->
+      <div class="card cockpit-card">
+        <div class="cockpit-grid">
+          <div class="throttle-zone">
+            <div class="zone-head">
+              <span>✊ 油门控制 (Throttle) — 支持按住 <kbd>Space</kbd> 或 <kbd>W</kbd> 轰油</span>
+              <strong class="mono accent" id="val-throttle">0%</strong>
+            </div>
+            <div class="throttle-controls">
+              <button id="btn-rev" class="btn-rev">🔥 按住全油门轰转 (HOLD TO REV)</button>
+              <button id="btn-blip" class="btn-blip">⚡ 点油门补油 (Blip)</button>
+            </div>
+            <input id="rng-throttle" type="range" min="0" max="100" value="0" />
+            <div class="cruise-row">
+              <label class="toggle-mini">
+                <input type="checkbox" id="chk-rpm-lock" />
+                锁定目标转速（定速精细调转模式）
+              </label>
+              <span class="mono muted" id="val-rpm-lock">目标: 4,000 RPM</span>
+            </div>
+            <input id="rng-rpm-lock" type="range" min="600" max="18000" step="50" value="4000" disabled />
+          </div>
+
+          <div class="gear-zone">
+            <div class="zone-head">
+              <span>⚙️ 6 速序列式变速箱 (<kbd>E</kbd> 升档 / <kbd>Q</kbd> 降档)</span>
+              <span class="muted mono" id="val-gear-ratio">空挡 (无负载)</span>
+            </div>
+            <div class="gear-buttons" id="gear-buttons">
+              <button class="gear-btn active" data-gear="0">N</button>
+              <button class="gear-btn" data-gear="1">1</button>
+              <button class="gear-btn" data-gear="2">2</button>
+              <button class="gear-btn" data-gear="3">3</button>
+              <button class="gear-btn" data-gear="4">4</button>
+              <button class="gear-btn" data-gear="5">5</button>
+              <button class="gear-btn" data-gear="6">6</button>
+            </div>
+            <div class="timescale-box">
+              <div class="zone-head">
+                <span>⏱️ 动画时间倍率（慢放观察四冲程与气门）</span>
+                <strong class="mono accent" id="val-timescale">0.08x (慢放观察)</strong>
+              </div>
+              <input id="rng-timescale" type="range" min="1" max="100" value="25" />
+              <div class="quick-mini">
+                <button class="chip-mini" data-ts="1">极慢 0.008x</button>
+                <button class="chip-mini" data-ts="15">慢放 0.04x</button>
+                <button class="chip-mini" data-ts="35">清晰 0.14x</button>
+                <button class="chip-mini" data-ts="65">高速 0.45x</button>
+                <button class="chip-mini" data-ts="100">实时 1.0x</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 下方双工程仪表：曲轴端面相序图 + 马力机/排气声波 -->
+      <div class="sub-visuals">
+        <div class="card">
+          <div class="sub-head">
+            <h3>🌀 曲轴端面相位雷达 (Crankpin Phase)</h3>
+            <span class="muted mono" id="phase-intervals">间隔: 180°-180°-180°-180°</span>
+          </div>
+          <div class="canvas-wrap">
+            <canvas id="phase-canvas" width="380" height="230"></canvas>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="sub-head">
+            <h3>📈 实时马力机曲线 (Dyno) &amp; 排气声波</h3>
+            <span class="muted mono" id="dyno-peak">峰值: 77 HP / 39 N·m</span>
+          </div>
+          <div class="canvas-wrap">
+            <canvas id="dyno-canvas" width="540" height="230"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== 右侧全参数 ECU & 机械调校面板 ==================== -->
+    <aside class="tuner-column">
+      <div class="card tuner-card">
+        <div class="tuner-tabs" role="tablist">
+          <button class="tuner-tab active" data-tuner="crank">曲轴与相位</button>
+          <button class="tuner-tab" data-tuner="mech">缸径与机械</button>
+          <button class="tuner-tab" data-tuner="ecu">ECU 与声浪</button>
+        </div>
+
+        <!-- Tab 1: 曲轴结构、曲柄偏角与点火相序 -->
+        <div id="tuner-crank" class="tuner-pane active">
+          <div class="field">
+            <label for="sel-crank-type">曲轴架构与偏置模式</label>
+            <select id="sel-crank-type">
+              <option value="flat180">平面曲轴 Flat-Plane (180° 等间隔 · 1-3-4-2)</option>
+              <option value="flat180_alt">平面曲轴 Flat-Plane (180° 等间隔 · 1-2-4-3)</option>
+              <option value="crossplane">雅马哈十字曲轴 Crossplane CP4 (270°-180°-90°-180°)</option>
+              <option value="bigbang">赛车 Big-Bang 双缸同步点火 (360° 大间隔)</option>
+              <option value="screamer720">均匀阶梯偏置 (0°-90°-180°-270°)</option>
+              <option value="custom">🔧 完全自定义四缸曲柄偏角 (DIY)</option>
+            </select>
+          </div>
+
+          <p class="hint-text">
+            提示：拖动下方 4 个气缸的 <strong>720° 四冲程点火相位偏角</strong>，可以任意 DIY 曲柄夹角与点火间隔，左侧剖面动画、曲轴雷达和排气管声浪会立刻改变！
+          </p>
+
+          <div class="phase-sliders">
+            <div class="field">
+              <div class="label-row">
+                <label for="ph-1">Cyl #1 曲柄相位偏移</label>
+                <strong class="mono accent" id="val-ph-1">0°</strong>
+              </div>
+              <input id="ph-1" class="phase-range" data-cyl="0" type="range" min="0" max="715" step="5" value="0" />
+            </div>
+
+            <div class="field">
+              <div class="label-row">
+                <label for="ph-2">Cyl #2 曲柄相位偏移</label>
+                <strong class="mono accent" id="val-ph-2">540°</strong>
+              </div>
+              <input id="ph-2" class="phase-range" data-cyl="1" type="range" min="0" max="715" step="5" value="540" />
+            </div>
+
+            <div class="field">
+              <div class="label-row">
+                <label for="ph-3">Cyl #3 曲柄相位偏移</label>
+                <strong class="mono accent" id="val-ph-3">180°</strong>
+              </div>
+              <input id="ph-3" class="phase-range" data-cyl="2" type="range" min="0" max="715" step="5" value="180" />
+            </div>
+
+            <div class="field">
+              <div class="label-row">
+                <label for="ph-4">Cyl #4 曲柄相位偏移</label>
+                <strong class="mono accent" id="val-ph-4">360°</strong>
+              </div>
+              <input id="ph-4" class="phase-range" data-cyl="3" type="range" min="0" max="715" step="5" value="360" />
+            </div>
+          </div>
+
+          <div class="field" style="margin-top: 12px;">
+            <div class="label-row">
+              <label for="rng-ign-adv">点火提前角 (Ignition Advance BTDC)</label>
+              <strong class="mono amber" id="val-ign-adv">18°</strong>
+            </div>
+            <input id="rng-ign-adv" type="range" min="0" max="48" step="1" value="18" />
+          </div>
+
+          <div class="field">
+            <div class="label-row">
+              <label for="rng-cam-overlap">凸轮轴气门重叠角 / 升程激进度</label>
+              <strong class="mono" id="val-cam-overlap">24° (高转赛道凸轮)</strong>
+            </div>
+            <input id="rng-cam-overlap" type="range" min="0" max="45" step="1" value="24" />
+          </div>
+        </div>
+
+        <!-- Tab 2: 缸径、行程、连杆比、飞轮惯量 -->
+        <div id="tuner-mech" class="tuner-pane">
+          <div class="spec-summary" id="mech-spec-box">
+            <div><span class="muted">总排量</span><strong class="mono accent" id="spec-cc">399 cc</strong></div>
+            <div><span class="muted">缸径行程比</span><strong class="mono" id="spec-bs-ratio">1.46 (超短行程高转)</strong></div>
+            <div><span class="muted">单缸排量</span><strong class="mono" id="spec-single-cc">99.8 cc</strong></div>
+          </div>
+
+          <div class="field">
+            <div class="label-row">
+              <label for="rng-bore">气缸缸径 (Bore)</label>
+              <strong class="mono accent" id="val-bore">57.0 mm</strong>
+            </div>
+            <input id="rng-bore" type="range" min="45" max="86" step="0.5" value="57" />
+          </div>
+
+          <div class="field">
+            <div class="label-row">
+              <label for="rng-stroke">活塞行程 (Stroke)</label>
+              <strong class="mono accent" id="val-stroke">39.1 mm</strong>
+            </div>
+            <input id="rng-stroke" type="range" min="34" max="75" step="0.1" value="39.1" />
+          </div>
+
+          <div class="field">
+            <div class="label-row">
+              <label for="rng-rod-ratio">连杆长度比 (Rod / Stroke)</label>
+              <strong class="mono" id="val-rod-ratio">1.95</strong>
+            </div>
+            <input id="rng-rod-ratio" type="range" min="1.45" max="2.40" step="0.05" value="1.95" />
+          </div>
+
+          <div class="field">
+            <div class="label-row">
+              <label for="rng-comp">几何压缩比 (Compression Ratio)</label>
+              <strong class="mono amber" id="val-comp">12.3 : 1</strong>
+            </div>
+            <input id="rng-comp" type="range" min="8.5" max="15.0" step="0.1" value="12.3" />
+          </div>
+
+          <div class="field">
+            <div class="label-row">
+              <label for="rng-flywheel">曲轴飞轮惯量 (拉转灵敏度)</label>
+              <strong class="mono" id="val-flywheel">0.85 (轻量化高转飞轮)</strong>
+            </div>
+            <input id="rng-flywheel" type="range" min="0.4" max="2.2" step="0.05" value="0.85" />
+          </div>
+        </div>
+
+        <!-- Tab 3: ECU 限转与排气管声浪调校 -->
+        <div id="tuner-ecu" class="tuner-pane">
+          <div class="field">
+            <div class="label-row">
+              <label for="rng-idle">怠速转速 (Idle RPM)</label>
+              <strong class="mono" id="val-idle">1,350 RPM</strong>
+            </div>
+            <input id="rng-idle" type="range" min="800" max="2600" step="50" value="1350" />
+          </div>
+
+          <div class="field">
+            <div class="label-row">
+              <label for="rng-redline">红线断油转速 (Rev Limiter)</label>
+              <strong class="mono red" id="val-redline">16,500 RPM</strong>
+            </div>
+            <input id="rng-redline" type="range" min="8000" max="18000" step="250" value="16500" />
+          </div>
+
+          <div class="field">
+            <label for="sel-limiter-type">断油保护风格 (Rev Limiter Cut)</label>
+            <select id="sel-limiter-type">
+              <option value="hard">硬断油 Hard Cut（清脆“哒哒哒”赛道火花切断）</option>
+              <option value="soft">软断油 Soft Cut（平顺限速）</option>
+              <option value="flame">暴躁偏时断油（高频断火 + 排气管喷火）</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="sel-exhaust">排气管音色预设 (Exhaust Tone)</label>
+            <select id="sel-exhaust">
+              <option value="stock">原厂回压排气（浑厚低沉）</option>
+              <option value="akrapovic" selected>天蝎全段钛合金（高转清脆四缸哨音）</option>
+              <option value="straight">MotoGP 竞技直通管（撕裂狂暴声浪）</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <div class="label-row">
+              <label for="rng-volume">引擎合成器总音量</label>
+              <strong class="mono accent" id="val-volume">65%</strong>
+            </div>
+            <input id="rng-volume" type="range" min="0" max="100" step="1" value="65" />
+          </div>
+
+          <div class="field">
+            <label class="toggle-card">
+              <input type="checkbox" id="chk-pops" checked />
+              <div>
+                <strong>🔥 高转收油回火放炮 (Pops &amp; Bangs)</strong>
+                <span class="muted">高转突然松开油门时模拟未燃尽油气在排气歧管爆燃回火</span>
+              </div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- 快捷操作指南 -->
+      <div class="card tips-card">
+        <h3>🎮 键盘快捷键</h3>
+        <ul>
+          <li><kbd>Space</kbd> 或 <kbd>W</kbd>：按住全油门轰转，松开触发收油回火</li>
+          <li><kbd>E</kbd> / <kbd>↑</kbd>：快速升档（1~6 档）</li>
+          <li><kbd>Q</kbd> / <kbd>↓</kbd>：降档补油（带模拟自动补油 Blip）</li>
+          <li><kbd>M</kbd>：一键开启 / 静音 Web Audio 实时物理声浪</li>
+        </ul>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <span>Built with ❤️ by <a href="https://github.com/xiaoA0v0" target="_blank" rel="noopener">xiaoA0v0 (fanzhenwei)</a> · HTML5 Canvas 2D + Web Audio API 零依赖实时合成</span>
+      <span class="muted">🏍️ Keep Riding, Keep Revving!</span>
+    </div>
+  </footer>
+
+  <script src="./engine.js"></script>
+  <script src="./audio.js"></script>
+  <script src="./renderer.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>
